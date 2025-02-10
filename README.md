@@ -1,4 +1,4 @@
-# 知乎右键屏蔽扩展 - 补充功能
+# Zhihu-right-click-block 知乎右键屏蔽特定内容
 
 ## 简介
 本扩展是 [zhihu-custom](https://github.com/liuyubing233/zhihu-custom) 的补充功能，zhihu-custom已实现大部分功能，本拓展程序为补充支持通过右键菜单屏蔽知乎中的特定标题或回答内容关键词，建议搭配使用。用户可以通过右键选中文本，快速将其添加到屏蔽列表中。
