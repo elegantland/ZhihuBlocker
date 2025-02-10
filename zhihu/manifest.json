@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Zhihu-right-click-block",
+  "version": "1.0",
+  "description": "根据关键词过滤知乎内容",
+  "permissions": ["storage", "contextMenus"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.zhihu.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+} 

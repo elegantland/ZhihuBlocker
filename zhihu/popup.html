@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 300px;
+      padding: 10px;
+    }
+    .filter-section {
+      margin-bottom: 10px;
+    }
+    textarea {
+      width: 100%;
+      height: 60px;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="filter-section">
+    <label>作者名关键词（每行一个）:</label>
+    <textarea id="authorKeywords"></textarea>
+  </div>
+  <div class="filter-section">
+    <label>问题关键词（每行一个）:</label>
+    <textarea id="questionKeywords"></textarea>
+  </div>
+  <div class="filter-section">
+    <label>回答内容关键词（每行一个）:</label>
+    <textarea id="answerKeywords"></textarea>
+  </div>
+  <button id="saveButton">保存设置</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html> 
