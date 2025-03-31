@@ -1,6 +1,29 @@
-// 创建右键菜单
+// 监听扩展程序启用/禁用状态
+chrome.management.onEnabled.addListener(function(info) {
+  console.log("Extension Enabled");
+  updateIcon(true);
+});
+
+chrome.management.onDisabled.addListener(function(info) {
+  console.log("Extension Disabled");
+  updateIcon(false);
+});
+
+// 监听 storage 变化
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'sync' && changes.blockingEnabled !== undefined) {
+    const enabled = changes.blockingEnabled.newValue;
+    updateIcon(enabled);
+  }
+});
+
+// 初始设置图标
 chrome.runtime.onInstalled.addListener(() => {
-  // 创建单个菜单项
+  chrome.storage.sync.get({ blockingEnabled: true }, ({ blockingEnabled }) => {
+    updateIcon(blockingEnabled);
+  });
+
+  // 创建右键菜单
   chrome.contextMenus.create({
     id: "addToFilter",
     title: "添加到知乎过滤器",
@@ -8,15 +31,39 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+// 更新图标函数
+function updateIcon(enabled) {
+  const iconPath = {
+    "32": `icons/icon-${enabled ? 'enabled' : 'disabled'}-32.png`
+  };
+  chrome.action.setIcon({ path: iconPath });
+}
+
 // 处理菜单点击事件
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   const selectedText = info.selectionText;
-  
+
   // 获取当前存储的选中区域类型
   chrome.storage.local.get('selectedType', ({ selectedType }) => {
     // 根据区域类型发送不同的消息
+    let action;
+    switch (selectedType) {
+      case 'title':
+        action = "addTitle";
+        break;
+      case 'content':
+        action = "addContent";
+        break;
+      case 'author':
+        action = "addAuthor";
+        break;
+      case 'comment':
+        action = "addComment";
+        break;
+    }
+
     chrome.tabs.sendMessage(tab.id, {
-      action: selectedType === 'title' ? "addTitle" : "addContent",
+      action: action,
       text: selectedText
     });
   });
@@ -27,12 +74,24 @@ chrome.runtime.onMessage.addListener((request, sender) => {
   if (request.action === "updateContextMenu") {
     // 保存选中区域类型
     chrome.storage.local.set({ selectedType: request.type });
-    
-    // 更新菜单标题
-    const title = request.type === 'title' ? 
-      "知乎屏蔽：添加到标题屏蔽" : 
-      "知乎屏蔽：添加到内容屏蔽";
-    
+
+    // 根据类型更新菜单标题
+    let title;
+    switch (request.type) {
+      case 'title':
+        title = "知乎屏蔽：添加到标题屏蔽";
+        break;
+      case 'content':
+        title = "知乎屏蔽：添加到内容屏蔽";
+        break;
+      case 'author':
+        title = "知乎屏蔽：添加到作者屏蔽";
+        break;
+      case 'comment':
+        title = "知乎屏蔽：添加到评论屏蔽";
+        break;
+    }
+
     chrome.contextMenus.update("addToFilter", {
       title: title
     });

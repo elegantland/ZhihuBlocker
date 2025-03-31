@@ -7,30 +7,111 @@
       width: 300px;
       padding: 10px;
     }
-    .filter-section {
-      margin-bottom: 10px;
-    }
     textarea {
       width: 100%;
-      height: 60px;
-      margin-top: 5px;
+      margin: 5px 0;
+    }
+    .section {
+      margin-bottom: 10px;
+    }
+    .switch-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      padding: 5px;
+      background-color: #f5f5f5;
+      border-radius: 4px;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 20px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: .4s;
+      border-radius: 20px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 2px;
+      bottom: 2px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: #2196F3;
+    }
+    input:checked + .slider:before {
+      transform: translateX(20px);
+    }
+    .button-container {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+    }
+    .button-container button {
+      padding: 5px 10px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      background: #fff;
+      cursor: pointer;
+    }
+    .button-container button:hover {
+      background: #f5f5f5;
+    }
+    #status {
+      margin-top: 10px;
+      color: green;
     }
   </style>
 </head>
 <body>
-  <div class="filter-section">
-    <label>作者名关键词（每行一个）:</label>
-    <textarea id="authorKeywords"></textarea>
+  <div class="switch-container">
+    <span>启用屏蔽</span>
+    <label class="switch">
+      <input type="checkbox" id="blockingSwitch" checked>
+      <span class="slider"></span>
+    </label>
   </div>
-  <div class="filter-section">
-    <label>问题关键词（每行一个）:</label>
-    <textarea id="questionKeywords"></textarea>
+  <div class="section">
+    <div>标题关键词：</div>
+    <textarea id="questionKeywords" rows="4"></textarea>
   </div>
-  <div class="filter-section">
-    <label>回答内容关键词（每行一个）:</label>
-    <textarea id="answerKeywords"></textarea>
+  <div class="section">
+    <div>内容关键词：</div>
+    <textarea id="answerKeywords" rows="4"></textarea>
   </div>
-  <button id="saveButton">保存设置</button>
+  <div class="section">
+    <div>作者关键词：</div>
+    <textarea id="authorKeywords" rows="4"></textarea>
+  </div>
+  <div class="section">
+    <div>评论关键词：</div>
+    <textarea id="commentKeywords" rows="4"></textarea>
+  </div>
+  <div class="button-container">
+    <button id="exportBtn">导出配置</button>
+    <button id="importBtn">导入配置</button>
+    <input type="file" id="importFile" style="display: none" accept=".json">
+  </div>
   <div id="status"></div>
   <script src="popup.js"></script>
 </body>

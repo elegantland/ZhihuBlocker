@@ -1,17 +1,26 @@
 {
   "manifest_version": 3,
-  "name": "Zhihu-right-click-block",
-  "version": "1.0",
+  "name": "ZhihuMessageBlocker",
+  "version": "1.1",
   "description": "根据关键词过滤知乎内容",
-  "permissions": ["storage", "contextMenus"],
+  "permissions": [
+    "storage", 
+    "contextMenus",
+    "management"
+  ],
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_title": "Z"
+  },
+  "icons": {
+    "32": "icons/icon-32.png"
   },
   "content_scripts": [
     {
       "matches": ["*://*.zhihu.com/*"],
       "js": ["content.js"],
-      "css": ["styles.css"]
+      "css": ["styles.css"],
+      "run_at": "document_end"
     }
   ],
   "background": {
