@@ -24,91 +24,235 @@ function checkKeywords(text, keywords) {
   return keywordArray.some(keyword => lowerCaseText.includes(keyword));
 }
 
-function filterContent() {
-  handleChromeError(() => {
-    chrome.storage.sync.get({
-      blockingEnabled: true,  // 默认启用
-      authorKeywords: '',
-      questionKeywords: '',
-      answerKeywords: '',
-      commentKeywords: '' // 新增评论关键词
-    }, function(items) {
-      // 如果屏蔽被禁用，显示所有内容
-      if (!items.blockingEnabled) {
-        document.querySelectorAll('.Feed, .HotItem, .TopstoryItem, .List-item').forEach(feed => {
-          const container = feed.closest('.TopstoryItem, .Card, .List-item') || feed;
-          container.style.display = '';
-        });
-        return;
-      }
+// 添加防抖函数
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
 
-      // 过滤内容逻辑
-      const feeds = document.querySelectorAll('.Feed, .HotItem, .TopstoryItem, .List-item');
-      
-      feeds.forEach(feed => {
-        const author = feed.querySelector('.AuthorInfo-name')?.textContent || 
-                      feed.querySelector('.UserLink-link')?.textContent || '';
-        
-        const question = feed.querySelector('.ContentItem-title, .HotItem-title, .QuestionItem-title')?.textContent || '';
-        const answer = feed.querySelector('.RichText, .HotItem-excerpt, .ContentItem-content')?.textContent || '';
-        
-        const hasFilteredComments = feed.querySelector('.css-1tdhe7b')?.textContent === '评论内容由作者筛选后展示';
+// 使用防抖包装 filterContent
+const debouncedFilterContent = debounce(filterContent, 300);
 
-        const isAuthorBlocked = checkKeywords(author, items.authorKeywords);
+// 添加已处理内容的记录
+const processedItems = new Set();
 
-        const container = feed.closest('[data-id]') || feed;
+// 添加全局变量来跟踪屏蔽状态
+let isBlockingEnabled = true;
 
-        if (isAuthorBlocked || 
-            checkKeywords(question, items.questionKeywords) ||
-            checkKeywords(answer, items.answerKeywords) ||
-            hasFilteredComments) {
-          container.style.display = 'none';
-        } else {
-          container.style.display = '';
-        }
-      });
+// 添加统计相关的函数和变量
+let stats = {
+  total: 0,
+  today: 0,
+  byType: {
+    author: 0,
+    title: 0,
+    content: 0,
+    comment: 0
+  },
+  lastResetDate: new Date().toDateString()
+};
 
-      // 过滤评论
-      document.querySelectorAll('.CommentContent').forEach(comment => {
-        const commentContainer = comment.closest('[data-id]');
-        
-        const mainAuthorLink = commentContainer?.querySelector('.css-10u695f');
-        const mainAuthor = mainAuthorLink?.textContent?.trim() || '';
+// 更新统计信息
+function updateStats(type) {
+  // 检查是否需要重置今日统计
+  const today = new Date().toDateString();
+  if (today !== stats.lastResetDate) {
+    stats.today = 0;
+    stats.lastResetDate = today;
+  }
 
-        const isAuthorBlocked = checkKeywords(mainAuthor, items.authorKeywords);
-        
-        if (isAuthorBlocked || checkKeywords(comment.textContent, items.commentKeywords)) {
-          commentContainer.style.display = 'none';
-        }
-      });
+  // 更新统计
+  stats.total++;
+  stats.today++;
+  stats.byType[type]++;
+
+  // 保存统计信息
+  chrome.storage.local.set({ stats: stats }, function() {
+    // 通知 popup 更新统计显示
+    chrome.runtime.sendMessage({
+      action: "updateStats",
+      stats: stats
     });
   });
 }
 
-// 初始过滤
-filterContent();
+function filterContent(authorKeywords, questionKeywords, answerKeywords, commentKeywords, minUpvotes) {
+  // 如果屏蔽被禁用，显示所有内容并返回
+  if (!isBlockingEnabled) {
+    const feedItems = document.querySelectorAll('.Feed, .HotItem, .List-item');
+    feedItems.forEach(item => {
+      const cardContainer = item.closest('.Card');
+      if (cardContainer) {
+        cardContainer.style.display = '';
+        processedItems.delete(cardContainer);
+      }
+      item.style.display = '';
+      processedItems.delete(item);
+    });
+    return;
+  }
 
-// 创建观察器监听动态加载的内容
-const observer = new MutationObserver(() => handleChromeError(filterContent));
+  // 从 storage 获取最新的关键词
+  chrome.storage.sync.get({
+    authorKeywords: '',
+    questionKeywords: '',
+    answerKeywords: '',
+    commentKeywords: '',
+    minUpvotes: 0,
+    blockingEnabled: true  // 添加 blockingEnabled 到获取项中
+  }, function(items) {
+    // 更新全局屏蔽状态
+    isBlockingEnabled = items.blockingEnabled;
+    
+    // 如果屏蔽被禁用，显示所有内容并返回
+    if (!isBlockingEnabled) {
+      const feedItems = document.querySelectorAll('.Feed, .HotItem, .List-item');
+      feedItems.forEach(item => {
+        const cardContainer = item.closest('.Card');
+        if (cardContainer) {
+          cardContainer.style.display = '';
+          processedItems.delete(cardContainer);
+        }
+        item.style.display = '';
+        processedItems.delete(item);
+      });
+      return;
+    }
+
+    const authorKeywordsArray = items.authorKeywords ? items.authorKeywords.split('\n').map(k => k.trim().toLowerCase()) : [];
+    const questionKeywordsArray = items.questionKeywords ? items.questionKeywords.split('\n').map(k => k.trim().toLowerCase()) : [];
+    const answerKeywordsArray = items.answerKeywords ? items.answerKeywords.split('\n').map(k => k.trim().toLowerCase()) : [];
+    const commentKeywordsArray = items.commentKeywords ? items.commentKeywords.split('\n').map(k => k.trim().toLowerCase()) : [];
+
+    // 获取所有需要过滤的内容项
+    const feedItems = document.querySelectorAll('.Feed, .HotItem, .List-item');
+
+    feedItems.forEach(item => {
+      // 检查是否已经处理过这个元素
+      if (processedItems.has(item)) {
+        return;
+      }
+
+      let shouldRemove = false;
+
+      // 检查是否为热榜项目
+      const isHotItem = item.classList.contains('HotItem');
+
+      // 获取标题和内容文本
+      let titleElement, contentElement;
+      if (isHotItem) {
+        titleElement = item.querySelector('.HotItem-title');
+        contentElement = item.querySelector('.HotItem-excerpt');
+      } else {
+        titleElement = item.querySelector('.ContentItem-title, .QuestionItem-title');
+        contentElement = item.querySelector('.RichText.ztext');
+      }
+
+      let titleText = titleElement ? titleElement.textContent.trim().toLowerCase() : '';
+      let contentText = contentElement ? contentElement.textContent.trim().toLowerCase() : '';
+
+      // 获取作者名
+      let authorElement = item.querySelector('.AuthorInfo-name, .UserLink-link');
+      let authorName = authorElement ? authorElement.textContent.trim().toLowerCase() : '';
+
+      // 关键词过滤
+      let blockReason = '';
+      let triggeredKeyword = '';
+      
+      if (authorKeywordsArray.some(keyword => authorName.includes(keyword))) {
+        shouldRemove = true;
+        triggeredKeyword = authorKeywordsArray.find(keyword => authorName.includes(keyword));
+        blockReason = `作者名 "${authorName}" 触发了屏蔽关键词 "${triggeredKeyword}"`;
+        updateStats('author');
+      } else if (questionKeywordsArray.some(keyword => titleText.includes(keyword))) {
+        shouldRemove = true;
+        triggeredKeyword = questionKeywordsArray.find(keyword => titleText.includes(keyword));
+        blockReason = `标题触发了屏蔽关键词 "${triggeredKeyword}"`;
+        updateStats('title');
+      } else if (answerKeywordsArray.some(keyword => contentText.includes(keyword))) {
+        shouldRemove = true;
+        triggeredKeyword = answerKeywordsArray.find(keyword => contentText.includes(keyword));
+        blockReason = `内容触发了屏蔽关键词 "${triggeredKeyword}"`;
+        updateStats('content');
+      } else if (commentKeywordsArray.some(keyword => contentText.includes(keyword))) {
+        shouldRemove = true;
+        triggeredKeyword = commentKeywordsArray.find(keyword => contentText.includes(keyword));
+        blockReason = `评论触发了屏蔽关键词 "${triggeredKeyword}"`;
+        updateStats('comment');
+      }
+
+      // 移除元素
+      if (shouldRemove) {
+        // 查找并隐藏外层的 Card 容器
+        const cardContainer = item.closest('.Card');
+        if (cardContainer) {
+          cardContainer.style.display = 'none';
+          processedItems.add(cardContainer);
+        }
+        item.style.display = 'none';
+        processedItems.add(item);
+        console.log(`[知乎屏蔽] ${blockReason} ${'-'.repeat(20)} 标题: "${titleText}"`);
+      } else {
+        // 确保之前被隐藏的元素能够重新显示
+        const cardContainer = item.closest('.Card');
+        if (cardContainer) {
+          cardContainer.style.display = '';
+          processedItems.delete(cardContainer);
+        }
+        item.style.display = '';
+        processedItems.delete(item);
+      }
+    });
+
+    // 定期清理已处理记录，避免内存泄漏
+    if (processedItems.size > 1000) {
+      processedItems.clear();
+    }
+  });
+}
+
+// 初始过滤
+debouncedFilterContent();
+
+// 修改观察器使用防抖版本
+const observer = new MutationObserver(() => handleChromeError(debouncedFilterContent));
 observer.observe(document.body, {
   childList: true,
   subtree: true
 });
 
-// 监听来自background script的消息
+// 修改消息处理部分
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   handleChromeError(() => {
+    // 处理所有可能包含 enabled 状态的消息
+    if (request.enabled !== undefined) {
+      isBlockingEnabled = request.enabled;
+    }
+
     if (request.action === "updateBlockingState") {
-      filterContent();  // 重新过滤
+      // 立即执行过滤
+      filterContent();
+      // 发送响应
+      sendResponse({ success: true });
     } else if (request.action === "updateFilter") {
-      filterContent();  // 重新过滤
+      // 使用防抖版本进行过滤
+      debouncedFilterContent();
+      // 发送响应
+      sendResponse({ success: true });
     } else if (request.action === "addTitle") {
       // 处理添加标题
       chrome.storage.sync.get({ questionKeywords: '' }, function(items) {
         const newKeywords = items.questionKeywords + (items.questionKeywords ? '\n' : '') + request.text;
         chrome.storage.sync.set({ questionKeywords: newKeywords }, function() {
           console.log('Title keyword added:', request.text);
-          filterContent();
+          debouncedFilterContent();
         });
       });
     } else if (request.action === "addContent") {
@@ -117,7 +261,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const newKeywords = items.answerKeywords + (items.answerKeywords ? '\n' : '') + request.text;
         chrome.storage.sync.set({ answerKeywords: newKeywords }, function() {
           console.log('Content keyword added:', request.text);
-          filterContent();
+          debouncedFilterContent();
         });
       });
     } else if (request.action === "addAuthor") {
@@ -126,15 +270,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const newKeywords = items.authorKeywords + (items.authorKeywords ? '\n' : '') + request.text;
         chrome.storage.sync.set({ authorKeywords: newKeywords }, function() {
           console.log('Author keyword added:', request.text);
-          filterContent();
+          debouncedFilterContent();
         });
       });
-    } else if (request.action === "addComment") { // 添加评论关键词
+    } else if (request.action === "addComment") {
       chrome.storage.sync.get({ commentKeywords: '' }, function(items) {
         const newKeywords = items.commentKeywords + (items.commentKeywords ? '\n' : '') + request.text;
         chrome.storage.sync.set({ commentKeywords: newKeywords }, function() {
           console.log('Comment keyword added:', request.text);
-          filterContent();
+          debouncedFilterContent();
         });
       });
     }
@@ -226,3 +370,17 @@ window.addEventListener('load', () => {
 document.addEventListener('contextmenu', (event) => {
   event.stopPropagation();
 }, true);
+
+// 初始化时加载统计信息
+chrome.storage.local.get('stats', function(data) {
+  if (data.stats) {
+    stats = data.stats;
+    // 检查是否需要重置今日统计
+    const today = new Date().toDateString();
+    if (today !== stats.lastResetDate) {
+      stats.today = 0;
+      stats.lastResetDate = today;
+      chrome.storage.local.set({ stats: stats });
+    }
+  }
+});
