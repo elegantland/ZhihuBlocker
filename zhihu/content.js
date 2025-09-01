@@ -17,10 +17,10 @@ function handleChromeError(callback) {
       }
       // 可以选择自动刷新页面
       // window.location.reload();
-      return null;
+      throw new Error('Extension context invalidated'); // 重新抛出错误
     } else {
       console.error('[知乎屏蔽] 发生错误:', error);
-      throw error;
+      throw error; // 重新抛出错误
     }
   }
 }
@@ -81,7 +81,7 @@ const debouncedFilterContent = debounce(() => {
 }, 300);
 
 // 添加已处理内容的记录
-const processedItems = new Set();
+// const processedItems = new Set();
 
 // 添加全局变量来跟踪屏蔽状态
 let isBlockingEnabled = true;
@@ -155,8 +155,9 @@ const commentProcessingState = new Map();
 // 添加全局的已处理评论ID集合
 const processedCommentIds = new Set();
 
-// 添加全局变量来跟踪已处理的标题
-const processedTitles = new Set();
+// 添加新的全局变量来跟踪当前被隐藏的元素和标题
+const currentlyHiddenItems = new Set();
+const currentlyHiddenTitles = new Set();
 
 // 修改 processCommentList 函数，清理调试信息
 function processCommentList(list) {
@@ -184,19 +185,17 @@ function processCommentList(list) {
 
     try {
       // 从 storage 获取最新的关键词
-      chrome.storage.sync.get({ commentKeywords: '', authorKeywords: '' }, function(items) {
+      chrome.storage.local.get({ commentKeywords: [], authorKeywords: [] }, function(items) {
         try {
-          const authorKeywordsArray = items.authorKeywords
-            ? items.authorKeywords.split('\n')
-                .map(k => k?.trim().toLowerCase())
-                .filter(k => k)
-            : [];
+          let authorKeywordsArray = items.authorKeywords;
+          if (typeof authorKeywordsArray === 'string') {
+            authorKeywordsArray = authorKeywordsArray.split('\n').map(k => k?.trim().toLowerCase()).filter(k => k);
+          }
 
-          const commentKeywordsArray = items.commentKeywords
-            ? items.commentKeywords.split('\n')
-                .map(k => k?.trim().toLowerCase())
-                .filter(k => k)
-            : [];
+          let commentKeywordsArray = items.commentKeywords;
+          if (typeof commentKeywordsArray === 'string') {
+            commentKeywordsArray = commentKeywordsArray.split('\n').map(k => k?.trim().toLowerCase()).filter(k => k);
+          }
 
           // 检查是否需要屏蔽
           let shouldHide = false;
@@ -305,7 +304,7 @@ function processCommentList(list) {
             if (shouldHide) {
               // 直接使用评论容器
               updateCommentVisibility(comment, true);
-              processedItems.add(commentId);
+              // processedItems.add(commentId);
               
               // 根据屏蔽原因输出不同的日志
               if (blockReason === 'author') {
@@ -325,7 +324,7 @@ function processCommentList(list) {
               }
             } else {
               updateCommentVisibility(comment, false);
-              processedItems.delete(commentId);
+              // processedItems.delete(commentId);
             }
           }
         } catch (error) {
@@ -435,16 +434,14 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
   // 如果屏蔽被禁用，显示所有内容并返回
   if (!isBlockingEnabled) {
     try {
-      const feedItems = document.querySelectorAll('.Feed, .HotItem, .List-item');
-      feedItems.forEach(item => {
-        const cardContainer = item.closest('.Card');
-        if (cardContainer) {
-          cardContainer.style.display = '';
-          processedItems.delete(cardContainer);
-        }
-        item.style.display = '';
-        processedItems.delete(item);
+      // 查找所有被本扩展屏蔽的元素
+      document.querySelectorAll('[data-zhihu-blocked="true"]').forEach(item => {
+        item.style.removeProperty('display');
+        item.removeAttribute('data-zhihu-blocked');
       });
+      // 清空追踪集合
+      currentlyHiddenItems.clear();
+      currentlyHiddenTitles.clear();
     } catch (error) {
       console.error('[知乎屏蔽] 显示内容时出错:', error);
     }
@@ -453,11 +450,11 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
 
   // 从 storage 获取最新的关键词
   try {
-    chrome.storage.sync.get({
-      authorKeywords: '',
-      questionKeywords: '',
-      answerKeywords: '',
-      commentKeywords: '',
+    chrome.storage.local.get({
+      authorKeywords: [], // 默认值改为数组
+      questionKeywords: [], // 默认值改为数组
+      answerKeywords: [], // 默认值改为数组
+      commentKeywords: [], // 默认值改为数组
       minUpvotes: 0,
       blockingEnabled: true
     }, function(items) {
@@ -473,30 +470,27 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
         
         // 如果屏蔽被禁用，显示所有内容并返回
         if (!isBlockingEnabled) {
-          const feedItems = document.querySelectorAll('.Feed, .HotItem, .List-item');
-          feedItems.forEach(item => {
-            const cardContainer = item.closest('.Card');
-            if (cardContainer) {
-              cardContainer.style.display = '';
-              processedItems.delete(cardContainer);
-            }
-            item.style.display = '';
-            processedItems.delete(item);
+          // 查找所有被本扩展屏蔽的元素
+          document.querySelectorAll('[data-zhihu-blocked="true"]').forEach(item => {
+            item.style.removeProperty('display');
+            item.removeAttribute('data-zhihu-blocked');
           });
+          // 清空追踪集合
+          currentlyHiddenItems.clear();
+          currentlyHiddenTitles.clear();
           return;
         }
 
         // 安全地处理关键词数组，添加空格处理
         const safeSplitKeywords = (keywords) => {
           if (!keywords) return [];
-          try {
-            return keywords.split('\n')
-              .map(k => k?.trim().toLowerCase())
-              .filter(k => k && k.length > 0); // 过滤掉空值和只包含空格的值
-          } catch (error) {
-            console.error('[知乎屏蔽] 处理关键词时出错:', error);
-            return [];
-          }
+          // 如果是字符串，则按换行符分割；如果是数组，则直接返回其副本
+          let keywordArray = typeof keywords === 'string' ?
+            keywords.split('\n').map(k => k?.trim().toLowerCase()).filter(k => k) :
+            Array.isArray(keywords) ?
+              keywords.map(k => k?.trim().toLowerCase()).filter(k => k) :
+              [];
+          return keywordArray;
         };
 
         const authorKeywordsArray = safeSplitKeywords(items.authorKeywords);
@@ -531,15 +525,29 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
           ].join(', ')) || item;
           
           // 检查是否已经处理过这个元素
-          if (processedItems.has(item) || processedItems.has(container)) {
-            return;
-          }
+          // if (processedItems.has(item) || processedItems.has(container)) {
+          //   return;
+          // }
 
           let shouldRemove = false;
           let blockReason = '';
           let triggeredKeyword = '';
           let titleText = '';
           let contentText = '';
+          let authorName = ''; // 定义作者名变量
+
+          // 优先从 data-zop 属性中获取作者名
+          const zopData = item.getAttribute('data-zop');
+          if (zopData) {
+            try {
+              const zop = JSON.parse(zopData);
+              if (zop.authorName) {
+                authorName = cleanText(zop.authorName);
+              }
+            } catch (e) {
+              console.warn('[知乎屏蔽] 解析 data-zop 属性失败:', e);
+            }
+          }
 
           // 检查是否为热榜项
           const isHotItem = item.classList.contains('HotItem');
@@ -558,24 +566,26 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
             }
           } else {
             // 原有的标题和内容获取逻辑
-            const authorSelectors = [
-              '.AuthorInfo-name .UserLink-link',
-              '.AuthorInfo-name a[href*="/people/"]',
-              '.UserLink-link', 
-              'a[href*="/people/"]',
-              '.CommentItemV2-meta a[href*="/people/"]'
-            ];
-            
-            let authorName = '';
-            for (const selector of authorSelectors) {
-              const authorElement = item.querySelector(selector);
-              if (authorElement) {
-                authorName = authorElement.textContent
-                  .trim()
-                  .replace(/\s+/g, ' ')
-                  .replace(/[\u200B-\u200D\uFEFF]/g, '')
-                  .toLowerCase();
-                if (authorName) break;
+            // 如果 data-zop 中没有作者名，则尝试通过选择器获取
+            if (!authorName) { 
+              const authorSelectors = [
+                '.AuthorInfo-name .UserLink-link',
+                '.AuthorInfo-name a[href*="/people/"]',
+                '.UserLink-link', 
+                'a[href*="/people/"]',
+                '.CommentItemV2-meta a[href*="/people/"]'
+              ];
+              
+              for (const selector of authorSelectors) {
+                const authorElement = item.querySelector(selector);
+                if (authorElement) {
+                  authorName = authorElement.textContent
+                    .trim()
+                    .replace(/\s+/g, ' ')
+                    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+                    .toLowerCase();
+                  if (authorName) break;
+                }
               }
             }
 
@@ -613,7 +623,7 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
           // 如果找不到标题，尝试从其他属性获取
           if (!titleText) {
             // 尝试从 data-zop 属性获取标题
-            const zopData = item.getAttribute('data-zop-itemid');
+            const zopData = item.getAttribute('data-zop');
             if (zopData) {
               try {
                 const zop = JSON.parse(zopData);
@@ -640,12 +650,22 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
           }
 
           // 如果标题已经被处理过，跳过
-          if (processedTitles.has(titleText)) {
+          if (currentlyHiddenTitles.has(titleText)) {
             return;
           }
-
-          // 检查标题关键词，使用更严格的匹配
-          const matchedKeyword = questionKeywordsArray.find(keyword => {
+          
+          // 检查作者关键词
+          if (authorName && authorKeywordsArray.some(keyword => cleanText(authorName).includes(cleanText(keyword)))) {
+            shouldRemove = true;
+            triggeredKeyword = authorKeywordsArray.find(keyword => cleanText(authorName).includes(cleanText(keyword)));
+            blockReason = 'author';
+            console.log(
+              `[知乎屏蔽] [作者] (触发关键词: [%c${triggeredKeyword}%c]) (作者: ${authorName})`,
+              'color: red; font-weight: bold;',
+              'color: inherit;'
+            );
+            updateStats('author');
+          } else if (questionKeywordsArray.some(keyword => {
             if (!keyword) return false;
             const cleanKeyword = cleanText(keyword);
             const cleanTitle = cleanText(titleText);
@@ -655,13 +675,20 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
               cleanTitle.includes(cleanKeyword) ||
               cleanKeyword.includes(cleanTitle)
             );
-          });
-
-          if (matchedKeyword) {
+          })) {
             shouldRemove = true;
-            triggeredKeyword = matchedKeyword;
+            triggeredKeyword = questionKeywordsArray.find(keyword => {
+              if (!keyword) return false;
+              const cleanKeyword = cleanText(keyword);
+              const cleanTitle = cleanText(titleText);
+              // 检查完整匹配或部分匹配
+              return cleanKeyword && (
+                cleanTitle === cleanKeyword || 
+                cleanTitle.includes(cleanKeyword) ||
+                cleanKeyword.includes(cleanTitle)
+              );
+            });
             blockReason = 'title';
-            // 修改标题屏蔽日志格式，添加红色样式
             console.log(
               `[知乎屏蔽] [标题] (触发关键词: [%c${triggeredKeyword}%c]) (标题: ${titleText})`,
               'color: red; font-weight: bold;',
@@ -672,7 +699,6 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
             shouldRemove = true;
             triggeredKeyword = answerKeywordsArray.find(keyword => contentText.includes(cleanText(keyword)));
             blockReason = 'content';
-            // 修改内容屏蔽日志格式，使用标题而不是内容预览
             console.log(
               `[知乎屏蔽] [内容] (触发关键词: [%c${triggeredKeyword}%c]) (标题: ${titleText})`,
               'color: red; font-weight: bold;',
@@ -692,18 +718,33 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
               container.closest('.Card'),
               container.closest('.TopstoryItem-isRecommend'),
               container.closest('[data-za-detail-view-path-module="FeedItem"]'),
-              container.closest('[data-za-detail-view-path-module="AnswerItem"]')
+              container.closest('[data-za-detail-view-path-module="AnswerItem"]'),
+              // 添加更多可能的选择器
+              container.closest('.ContentItem'),
+              container.closest('.AnswerItem'),
+              container.closest('.QuestionItem'),
+              // 添加最外层容器
+              container.closest('.TopstoryItem-isRecommend'),
+              container.closest('.TopstoryItem'),
+              container.closest('.Card.TopstoryItem'),
+              container.closest('.Card.TopstoryItem-isRecommend')
             ].filter(Boolean); // 过滤掉 null 值
 
+            // 确保所有容器都被隐藏
             containersToHide.forEach(container => {
-              if (container) {
-                container.style.display = 'none';
-                processedItems.add(container);
+              if (container && !container.hasAttribute('data-zhihu-blocked')) {
+                // 使用 !important 确保样式被应用
+                container.style.setProperty('display', 'none', 'important');
+                // 添加自定义属性标记已处理
+                container.setAttribute('data-zhihu-blocked', 'true');
+                currentlyHiddenItems.add(container);
               }
             });
             
             // 记录已处理的标题
-            processedTitles.add(titleText);
+            if (!currentlyHiddenTitles.has(titleText)) {
+              currentlyHiddenTitles.add(titleText);
+            }
           } else {
             // 显示内容
             const containersToShow = [
@@ -714,19 +755,31 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
               container.closest('.Card'),
               container.closest('.TopstoryItem-isRecommend'),
               container.closest('[data-za-detail-view-path-module="FeedItem"]'),
-              container.closest('[data-za-detail-view-path-module="AnswerItem"]')
+              container.closest('[data-za-detail-view-path-module="AnswerItem"]'),
+              // 添加更多可能的选择器
+              container.closest('.ContentItem'),
+              container.closest('.AnswerItem'),
+              container.closest('.QuestionItem'),
+              // 添加最外层容器
+              container.closest('.TopstoryItem-isRecommend'),
+              container.closest('.TopstoryItem'),
+              container.closest('.Card.TopstoryItem'),
+              container.closest('.Card.TopstoryItem-isRecommend')
             ].filter(Boolean); // 过滤掉 null 值
 
             containersToShow.forEach(container => {
-              if (container) {
-                container.style.display = '';
-                processedItems.delete(container);
+              if (container && container.hasAttribute('data-zhihu-blocked')) {
+                // 移除 !important 样式
+                container.style.removeProperty('display');
+                // 移除自定义属性
+                container.removeAttribute('data-zhihu-blocked');
+                currentlyHiddenItems.delete(container);
               }
             });
             
             // 移除已处理的标题记录
-            if (titleText) {
-              processedTitles.delete(titleText);
+            if (titleText && currentlyHiddenTitles.has(titleText)) {
+              currentlyHiddenTitles.delete(titleText);
             }
           }
         });
@@ -743,9 +796,9 @@ function filterContent(authorKeywords, questionKeywords, answerKeywords, comment
         }
 
         // 定期清理已处理记录，避免内存泄漏
-        if (processedItems.size > 1000) {
-          processedItems.clear();
-        }
+        // if (processedItems.size > 1000) {
+        //   processedItems.clear();
+        // }
       } catch (error) {
         console.error('[知乎屏蔽] 处理内容时出错:', error);
       }
@@ -767,7 +820,7 @@ const observer = new MutationObserver((mutations) => {
           const newContent = node.querySelector?.(TITLE_SELECTORS);
           if (newContent) {
             const titleText = cleanText(newContent.textContent);
-            return titleText && !processedTitles.has(titleText);
+            return titleText && !currentlyHiddenTitles.has(titleText);
           }
           return false;
         }
@@ -921,25 +974,67 @@ function getSelectionType() {
   const selectedText = selection.toString().trim();
   if (!selectedText) return null;
 
+  // 函数：专门用于清理用户选中的文本，以便与作者名进行比较
+  const cleanSelectedTextForAuthorComparison = (text) => {
+    if (!text) return '';
+    return text
+      .trim()
+      .replace(/[\u200B-\u200D\uFEFF]/g, '') // 移除零宽字符
+      .replace(/[：:]+$/, '') // 移除末尾的中英文冒号
+      .replace(/\s+/g, ' ') // 统一空格
+      .toLowerCase();
+  };
+
   // 检查是否为作者区域
   const isAuthorArea = (node) => {
+    // 向上查找最近的 ContentItem 或 AnswerItem 容器
+    const contentItem = node.closest('.ContentItem, .AnswerItem');
+    if (!contentItem) {
+      return false;
+    }
+
+    const zopData = contentItem.getAttribute('data-zop');
+    if (!zopData) {
+      return false;
+    }
+
+    try {
+      const zop = JSON.parse(zopData);
+      const authorNameFromZop = zop.authorName;
+      if (authorNameFromZop) {
+        // 清理并比较作者名和选中文本
+        const cleanAuthorName = cleanText(authorNameFromZop);
+        const cleanSelectedText = cleanSelectedTextForAuthorComparison(selectedText);
+
+        if (cleanAuthorName === cleanSelectedText || cleanAuthorName.includes(cleanSelectedText) || cleanSelectedText.includes(cleanAuthorName)) {
+          window.currentContentContainer = contentItem.querySelector('.AuthorInfo-name a[href*="/people/"]') || contentItem; // 保存作者链接或内容容器
+          window.currentSelectedText = authorNameFromZop.trim(); // 保存完整的作者名
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('[知乎屏蔽] 解析 data-zop 属性失败:', e);
+    }
+
     // 检查当前节点或其父节点是否是作者链接
     const authorLink = node.closest('a[href*="/people/"]');
-    if (!authorLink) return false;
+    if (authorLink) {
+      // 获取作者链接中的实际文本
+      const authorText = authorLink.textContent.trim();
+      const cleanAuthorText = cleanText(authorText);
+      const cleanSelectedTextForLink = cleanSelectedTextForAuthorComparison(selectedText);
 
-    // 获取作者链接中的实际文本
-    const authorText = authorLink.textContent.trim();
-    
-    // 检查选中的文本是否与作者名匹配
-    if (authorText === selectedText || authorText.includes(selectedText) || selectedText.includes(authorText)) {
-      // 保存容器的引用，以便后续使用
-      window.currentContentContainer = authorLink;
-      // 使用完整的作者名作为屏蔽关键词
-      window.currentSelectedText = authorText
-        .trim()
-        .replace(/\s+/g, ' ')
-        .replace(/[\u200B-\u200D\uFEFF]/g, '');
-      return true;
+      // 检查选中的文本是否与作者名匹配
+      if (cleanAuthorText === cleanSelectedTextForLink || cleanAuthorText.includes(cleanSelectedTextForLink) || cleanSelectedTextForLink.includes(cleanAuthorText)) {
+        // 保存容器的引用，以便后续使用
+        window.currentContentContainer = authorLink;
+        // 使用完整的作者名作为屏蔽关键词
+        window.currentSelectedText = authorText
+          .trim()
+          .replace(/\s+/g, ' ')
+          .replace(/[\u200B-\u200D\uFEFF]/g, '');
+        return true;
+      }
     }
     return false;
   };
@@ -989,104 +1084,160 @@ setInterval(() => {
 
 // 修改消息处理部分
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  const result = handleChromeError(() => {
+  let responded = false; // 标记是否已发送响应
+
+  const sendResponseOnce = (response) => {
+    if (!responded) {
+      sendResponse(response);
+      responded = true;
+    }
+  };
+
+  try {
     // 处理所有可能包含 enabled 状态的消息
     if (request.enabled !== undefined) {
       isBlockingEnabled = request.enabled;
     }
 
     if (request.action === "updateBlockingState") {
-      // 清除已处理记录，确保重新检查所有内容
-      processedItems.clear();
-      // 立即执行过滤
+      currentlyHiddenItems.clear();
+      currentlyHiddenTitles.clear();
       filterContent();
-      // 发送响应
-      sendResponse({ success: true });
+      sendResponseOnce({ success: true });
     } else if (request.action === "updateFilter" || request.action === "deleteKeyword") {
-      // 清除所有状态
-      processedItems.clear();
-      processedTitles.clear();
+      currentlyHiddenItems.clear();
+      currentlyHiddenTitles.clear();
       commentStates.clear();
       processedCommentIds.clear();
-      // 重新处理所有内容
       filterContent();
-      // 立即处理评论
       processComments();
-      sendResponse({ success: true });
+      sendResponseOnce({ success: true });
     } else if (request.action === "addTitle") {
-      chrome.storage.sync.get({ questionKeywords: '' }, function(items) {
+      chrome.storage.local.get({ questionKeywords: [] }, function(items) {
         handleChromeError(() => {
-          const newKeywords = items.questionKeywords + (items.questionKeywords ? '\n' : '') + request.text;
-          chrome.storage.sync.set({ questionKeywords: newKeywords }, function() {
-            console.log('[知乎屏蔽] 标题关键词已添加:', request.text);
-            // 清除已处理记录
-            processedItems.clear();
-            // 立即执行过滤
-            filterContent();
-          });
+          let existingKeywords = items.questionKeywords;
+          if (typeof existingKeywords === 'string') {
+            existingKeywords = existingKeywords.split('\n').map(k => k.trim()).filter(k => k);
+          }
+          const newKeyword = request.text.trim();
+          if (newKeyword && !existingKeywords.includes(newKeyword)) {
+            existingKeywords.push(newKeyword);
+            chrome.storage.local.set({ questionKeywords: existingKeywords }, function() {
+              console.log('[知乎屏蔽] 标题关键词已添加:', newKeyword);
+              currentlyHiddenItems.clear();
+              currentlyHiddenTitles.clear();
+              filterContent();
+              sendResponseOnce({ success: true });
+            });
+          } else if (newKeyword) {
+            console.log('[知乎屏蔽] 标题关键词已存在:', newKeyword);
+            sendResponseOnce({ success: true, message: 'Keyword already exists.' });
+          } else {
+            sendResponseOnce({ success: false, message: 'No keyword provided.' });
+          }
         });
       });
     } else if (request.action === "addContent") {
-      chrome.storage.sync.get({ answerKeywords: '' }, function(items) {
+      chrome.storage.local.get({ answerKeywords: [] }, function(items) {
         handleChromeError(() => {
-          const newKeywords = items.answerKeywords + (items.answerKeywords ? '\n' : '') + request.text;
-          chrome.storage.sync.set({ answerKeywords: newKeywords }, function() {
-            console.log('[知乎屏蔽] 内容关键词已添加:', request.text);
-            // 清除已处理记录
-            processedItems.clear();
-            // 立即执行过滤
-            filterContent();
-          });
+          let existingKeywords = items.answerKeywords;
+          if (typeof existingKeywords === 'string') {
+            existingKeywords = existingKeywords.split('\n').map(k => k.trim()).filter(k => k);
+          }
+          const newKeyword = request.text.trim();
+          if (newKeyword && !existingKeywords.includes(newKeyword)) {
+            existingKeywords.push(newKeyword);
+            chrome.storage.local.set({ answerKeywords: existingKeywords }, function() {
+              console.log('[知乎屏蔽] 内容关键词已添加:', newKeyword);
+              currentlyHiddenItems.clear();
+              currentlyHiddenTitles.clear();
+              filterContent();
+              sendResponseOnce({ success: true });
+            });
+          } else if (newKeyword) {
+            console.log('[知乎屏蔽] 内容关键词已存在:', newKeyword);
+            sendResponseOnce({ success: true, message: 'Keyword already exists.' });
+          } else {
+            sendResponseOnce({ success: false, message: 'No keyword provided.' });
+          }
         });
       });
     } else if (request.action === "addAuthor") {
-      chrome.storage.sync.get({ authorKeywords: '' }, function(items) {
+      chrome.storage.local.get({ authorKeywords: [] }, function(items) {
         handleChromeError(() => {
-          // 使用清理后的选中文本
+          let existingKeywords = items.authorKeywords;
+          if (typeof existingKeywords === 'string') {
+            existingKeywords = existingKeywords.split('\n').map(k => k.trim()).filter(k => k);
+          }
           const textToAdd = window.currentSelectedText || request.text.trim();
-          // 检查是否已存在该关键词
-          const existingKeywords = items.authorKeywords ? items.authorKeywords.split('\n') : [];
-          if (!existingKeywords.includes(textToAdd)) {
-            const newKeywords = items.authorKeywords + (items.authorKeywords ? '\n' : '') + textToAdd;
-            chrome.storage.sync.set({ authorKeywords: newKeywords }, function() {
+          if (textToAdd && !existingKeywords.includes(textToAdd)) {
+            existingKeywords.push(textToAdd);
+            chrome.storage.local.set({ authorKeywords: existingKeywords }, function() {
               console.log('[知乎屏蔽] 作者关键词已添加:', textToAdd);
-              // 清除已处理记录
-              processedItems.clear();
-              processedCommentIds.clear();  // 清除已处理的评论记录
-              commentStates.clear();        // 清除评论状态
-              // 立即执行评论处理
+              currentlyHiddenItems.clear();
+              currentlyHiddenTitles.clear();
+              processedCommentIds.clear();
+              commentStates.clear();
               processComments();
-              // 同时执行内容过滤
               filterContent();
+              sendResponseOnce({ success: true });
             });
-          } else {
+          } else if (textToAdd) {
             console.log('[知乎屏蔽] 作者关键词已存在:', textToAdd);
+            sendResponseOnce({ success: true, message: 'Keyword already exists.' });
+          } else {
+            sendResponseOnce({ success: false, message: 'No keyword provided.' });
           }
         });
       });
     } else if (request.action === "addComment") {
-      chrome.storage.sync.get({ commentKeywords: '' }, function(items) {
+      chrome.storage.local.get({ commentKeywords: [] }, function(items) {
         handleChromeError(() => {
-          const newKeywords = items.commentKeywords + (items.commentKeywords ? '\n' : '') + request.text;
-          chrome.storage.sync.set({ commentKeywords: newKeywords }, function() {
-            console.log('[知乎屏蔽] 评论关键词已添加:', request.text);
-            // 清除已处理记录
-            processedItems.clear();
-            processedCommentIds.clear();  // 清除已处理的评论记录
-            commentStates.clear();        // 清除评论状态
-            // 立即执行评论处理，不使用防抖
-            processComments();
-            // 同时执行内容过滤
-            filterContent();
-          });
+          let existingKeywords = items.commentKeywords;
+          if (typeof existingKeywords === 'string') {
+            existingKeywords = existingKeywords.split('\n').map(k => k.trim()).filter(k => k);
+          }
+          const newKeyword = request.text.trim();
+          if (newKeyword && !existingKeywords.includes(newKeyword)) {
+            existingKeywords.push(newKeyword);
+            chrome.storage.local.set({ commentKeywords: existingKeywords }, function() {
+              console.log('[知乎屏蔽] 评论关键词已添加:', newKeyword);
+              currentlyHiddenItems.clear();
+              currentlyHiddenTitles.clear();
+              processedCommentIds.clear();
+              commentStates.clear();
+              processComments();
+              filterContent();
+              sendResponseOnce({ success: true });
+            });
+          } else if (newKeyword) {
+            console.log('[知乎屏蔽] 评论关键词已存在:', newKeyword);
+            sendResponseOnce({ success: true, message: 'Keyword already exists.' });
+          } else {
+            sendResponseOnce({ success: false, message: 'No keyword provided.' });
+          }
         });
       });
     }
-  });
-
-  // 如果处理过程中发生错误，返回错误信息
-  if (result === null) {
-    sendResponse({ success: false, error: 'Extension context invalidated' });
+  } catch (error) {
+    // 捕获 handleChromeError 抛出的错误
+    sendResponseOnce({ success: false, error: error.message });
   }
   return true; // 保持消息通道开放
 });
+
+// 添加样式规则
+const style = document.createElement('style');
+style.textContent = `
+  [data-zhihu-blocked="true"] {
+    display: none !important;
+  }
+`;
+document.head.appendChild(style);
+
+setInterval(() => {
+  // processedItems.clear();
+  // processedTitles.clear();
+  filterContent();
+  processComments();
+}, 60000); // 每60秒强制刷新一次

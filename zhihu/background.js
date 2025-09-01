@@ -11,7 +11,7 @@ chrome.management.onDisabled.addListener(function(info) {
 
 // 监听 storage 变化
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'sync' && changes.blockingEnabled !== undefined) {
+  if (areaName === 'local' && changes.blockingEnabled !== undefined) { // 修改这里
     const enabled = changes.blockingEnabled.newValue;
     updateIcon(enabled);
   }
