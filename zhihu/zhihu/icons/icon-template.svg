@@ -1,7 +1,0 @@
-<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <!-- 背景圆圈 -->
-  <circle cx="64" cy="64" r="60" fill="#FFFFFF" stroke="currentColor" stroke-width="4"/>
-  
-  <!-- Z 字母 -->
-  <path d="M40 40h48v10L52 88h36v10H40V88l36-38H40z" fill="currentColor"/>
-</svg> 
